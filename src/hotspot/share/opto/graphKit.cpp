@@ -1176,7 +1176,7 @@ Node* GraphKit::load_object_klass(Node* obj) {
 }
 
 //-------------------------load_array_length-----------------------------------
-Node* GraphKit::load_array_length(Node* array) {
+Node* GraphKit::load_array_length(Node* array, bool ideal_length) {
   // Special-case a fresh allocation to avoid building nodes:
   AllocateArrayNode* alloc = AllocateArrayNode::Ideal_array_allocation(array, &_gvn);
   Node *alen;
@@ -1185,9 +1185,11 @@ Node* GraphKit::load_array_length(Node* array) {
     alen = _gvn.transform( new LoadRangeNode(0, immutable_memory(), r_adr, TypeInt::POS));
   } else {
     alen = alloc->Ideal_length();
-    Node* ccast = alloc->make_ideal_length(_gvn.type(array)->is_oopptr(), &_gvn);
-    if (ccast != alen) {
-      alen = _gvn.transform(ccast);
+    if (ideal_length) {
+      Node* ccast = alloc->make_ideal_length(_gvn.type(array)->is_oopptr(), &_gvn);
+      if (ccast != alen) {
+        alen = _gvn.transform(ccast);
+      }
     }
   }
   return alen;

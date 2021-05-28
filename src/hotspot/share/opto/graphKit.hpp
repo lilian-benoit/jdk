@@ -342,7 +342,7 @@ class GraphKit : public Phase {
   // Find out the klass of an object.
   Node* load_object_klass(Node* object);
   // Find out the length of an array.
-  Node* load_array_length(Node* array);
+  Node* load_array_length(Node* array, bool ideal_length = true);
 
 
   // Helper function to do a NULL pointer check or ZERO check based on type.

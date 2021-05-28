@@ -4474,6 +4474,19 @@ void LibraryCallKit::arraycopy_move_allocation_here(AllocateArrayNode* alloc, No
     dest->set_req(0, control());
     Node* destx = _gvn.transform(dest);
     assert(destx == dest, "where has the allocation result gone?");
+
+    // Cast length on remaining path to be as narrow as possible
+    // previous CastNode inserted when creating AllocateArrayNode
+    // is removed in early step in LibraryCallKit::inline_arraycopy
+    Node* length = alloc->in(AllocateNode::ALength);
+    if (map()->find_edge(length) >= 0) {
+      Node* ccast = alloc->make_ideal_length(ary_type, &_gvn);
+      if (ccast != length) {
+        _gvn.set_type_bottom(ccast);
+        record_for_igvn(ccast);
+        replace_in_map(length, ccast);
+      }
+    }
   }
 }
 
@@ -4531,6 +4544,45 @@ bool LibraryCallKit::inline_arraycopy() {
     // uncommon trap to be emitted then the allocation can't be
     // considered tightly coupled in this context.
     alloc = tightly_coupled_allocation(dest);
+  }
+
+  // arraycopy_move_allocation_here will replace InitializeNode's output_control uses' control to
+  // AllocateArrayNode's input control.
+  // CastIINode might created in GraphKit::new_array (in AllocateArrayNode::make_ideal_length).
+  // CastIINode's input_control should still use InitializeNode's output_control after inline_arraycopy.
+  // Otherwise it breaks constraint assumption.
+  //
+  // Because alloc is tightly coupled, checking InitializeNode's control proj's output for
+  // for CastIINode. After finding CastIINode, actions include:
+  // 1. Replace CastIINode with AllocateArrayNode's length.
+  // 2. Create CastIINode again in arraycopy_move_allocation_here after control flow adjustion.
+  if (saved_jvms != NULL) {
+    assert(alloc != NULL, "only with a tightly coupled allocation");
+    InitializeNode* init = alloc->initialization();
+    Node* init_control = init->proj_out(TypeFunc::Control);
+    Node* alloc_length = alloc->Ideal_length();
+#ifdef ASSERT
+    Node* prev_cast = NULL;
+#endif
+    for (uint i = 0; i < init_control->outcnt(); i++) {
+      Node *init_out = init_control->raw_out(i);
+      if (init_out->is_CastII() && init_out->in(0) == init_control && init_out->in(1) == alloc_length) {
+#ifdef ASSERT
+        if (prev_cast == NULL) {
+          prev_cast = init_out;
+        } else {
+          // CastII must be same
+          CastIINode* prev = prev_cast->as_CastII();
+          CastIINode* cur = init_out->as_CastII();
+          assert(prev->has_range_check() == cur->has_range_check(), "not same");
+          assert(prev->type()->is_int()->_lo == cur->type()->is_int()->_lo, "not same");
+          assert(prev->type()->is_int()->_hi == cur->type()->is_int()->_hi, "not same");
+        }
+#endif
+        C->gvn_replace_by(init_out, alloc_length);
+        record_for_igvn(init_out);
+      }
+    }
   }
 
   bool validated = false;
@@ -4672,8 +4724,10 @@ bool LibraryCallKit::inline_arraycopy() {
                          slow_region);
 
     // (8) dest_offset + length must not exceed length of dest.
+    // Skipping make_ideal_length in load_array_length when allocation will be moved.
+    // Avoid create ConstrainedCast for array length before array allocation.
     generate_limit_guard(dest_offset, length,
-                         load_array_length(dest),
+                         load_array_length(dest, saved_jvms == NULL),
                          slow_region);
 
     // (6) length must not be negative.
