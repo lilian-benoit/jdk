@@ -570,7 +570,11 @@ abstract class AbstractStringBuilder implements Appendable, CharSequence {
      * at index <i>k</i> in the old character sequence, if <i>k</i> is less
      * than <i>n</i>; otherwise, it is equal to the character at index
      * <i>k-n</i> in the argument {@code str}.
-     *
+     * <p>
+     * This method prevents overflow by ensure capacity necessary. It is 
+     * calculated by addition of current length of sequence of characters 
+     * and length of {@code str}.
+     * 
      * @param   str   a string.
      * @return  a reference to this object.
      */
